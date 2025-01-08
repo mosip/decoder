@@ -53,6 +53,12 @@ public class ByteStreamUtil {
 
 	public int getBufferU(ByteBufferContext byteBufCont, byte[] target, int size) {
 		int pos = byteBufCont.getBuffer().position();
+		// Validate that the requested size does not exceed remaining bytes
+		int remaining = byteBufCont.getBuffer().remaining();
+		if (size > remaining) {
+			size = remaining;
+		}
+
 		System.arraycopy(byteBufCont.getBuffer().array(), pos, target, 0, size);
 		byteBufCont.getBuffer().position(pos + size);
 		return size;
@@ -60,6 +66,11 @@ public class ByteStreamUtil {
 
 	public int getBufferU(ByteBufferContext byteBufCont, byte[] target, int dstPos, int size) {
 		int pos = byteBufCont.getBuffer().position();
+		// Validate that the requested size does not exceed remaining bytes
+		int remaining = byteBufCont.getBuffer().remaining();
+		if (size > remaining) {
+			size = remaining;
+		}
 		System.arraycopy(byteBufCont.getBuffer().array(), pos, target, dstPos, size);
 		byteBufCont.getBuffer().position(pos + size);
 		return size;
@@ -619,6 +630,7 @@ public class ByteStreamUtil {
 	 * @return The int
 	 */
 	public int get3UnsignedByteInt(ByteBuffer byteBuffer, int offset, ByteOrder order) {
+
 		int offInc = 1;
 		if (order == ByteOrder.BIG_ENDIAN) {
 			offInc = -1;
@@ -640,19 +652,35 @@ public class ByteStreamUtil {
 	 * @return The int
 	 */
 	public int get3SignedByteInt(ByteBuffer byteBuffer, int offset, ByteOrder order) {
-		int offInc = 1;
-	    if (order == ByteOrder.BIG_ENDIAN) {
-	        offInc = -1;
-	        offset += 2;
-	    }
+		if (order == ByteOrder.BIG_ENDIAN) {
+			// Read in big-endian order (most significant byte first)
+			int byte1 = byteBuffer.get(offset) & 0xFF; // MSB
+			int byte2 = byteBuffer.get(offset + 1) & 0xFF;
+			int byte3 = byteBuffer.get(offset + 2) & 0xFF;
 
-	    // Read the three bytes
-	    int b1 = getUnsignedByte(byteBuffer, offset);
-	    int b2 = getUnsignedByte(byteBuffer, offset + (1 * offInc));
-	    int b3 = getSignedByte(byteBuffer, offset + (2 * offInc)); // Use signed for the highest byte
+			// Combine bytes into a 24-bit integer
+			int result = (byte1 << 16) | (byte2 << 8) | byte3;
 
-	    // Combine them into a 24-bit signed integer
-	    return (b3 << 16) | (b2 << 8) | b1;
+			// Adjust for sign (if the 24th bit is set)
+			if ((result & 0x800000) != 0) {
+				result |= 0xFF000000; // Extend sign to 32 bits
+			}
+			return result;
+		} else {
+			// Read in little-endian order (least significant byte first)
+			int byte1 = byteBuffer.get(offset) & 0xFF; // LSB
+			int byte2 = byteBuffer.get(offset + 1) & 0xFF;
+			int byte3 = byteBuffer.get(offset + 2) & 0xFF;
+
+			// Combine bytes into a 24-bit integer
+			int result = (byte3 << 16) | (byte2 << 8) | byte1;
+
+			// Adjust for sign (if the 24th bit is set)
+			if ((result & 0x800000) != 0) {
+				result |= 0xFF000000; // Extend sign to 32 bits
+			}
+			return result;
+		}
 	}
 
 	/**
@@ -734,6 +762,7 @@ public class ByteStreamUtil {
 	 * @return The long
 	 */
 	public long getUnsignedInt(ByteBuffer byteBuffer, int offset, ByteOrder order) {
+
 		int offInc = 1;
 		if (order == ByteOrder.BIG_ENDIAN) {
 			offInc = -1;
@@ -756,30 +785,18 @@ public class ByteStreamUtil {
 	 * @return The long
 	 */
 	public long getSignedInt(ByteBuffer byteBuffer, int offset, ByteOrder order) {
-		int offInc = 1;
-	    if (order == ByteOrder.BIG_ENDIAN) {
-	        offInc = -1;
-	        offset += 3;
-	    }
+		int result;
 
-	    // Retrieve the bytes and construct the integer
-	    int byte1 = getSignedByte(byteBuffer, offset);
-	    int byte2 = getSignedByte(byteBuffer, offset + (1 * offInc));
-	    int byte3 = getSignedByte(byteBuffer, offset + (2 * offInc));
-	    int byte4 = getSignedByte(byteBuffer, offset + (3 * offInc));
-
-	    // Combine the bytes correctly to form a 32-bit signed integer
-	    long rtn = byte1 & 0xFF; // Keep the least significant byte as is
-	    rtn |= (byte2 & 0xFF) << 8;
-	    rtn |= (byte3 & 0xFF) << 16;
-	    rtn |= (byte4 & 0xFF) << 24;
-
-	    // Sign-extend if necessary (to handle negative values)
-	    if ((rtn & 0x80000000L) != 0) {
-	        rtn |= 0xFFFFFFFF00000000L; // Extend the sign bit to the full 64-bit long
-	    }
-
-	    return rtn;
+		if (order == ByteOrder.BIG_ENDIAN) {
+			// Read in big-endian order (most significant byte first)
+			result = (byteBuffer.get(offset) & 0xFF) << 24 | (byteBuffer.get(offset + 1) & 0xFF) << 16
+					| (byteBuffer.get(offset + 2) & 0xFF) << 8 | (byteBuffer.get(offset + 3) & 0xFF);
+		} else {
+			// Read in little-endian order (least significant byte first)
+			result = (byteBuffer.get(offset + 3) & 0xFF) << 24 | (byteBuffer.get(offset + 2) & 0xFF) << 16
+					| (byteBuffer.get(offset + 1) & 0xFF) << 8 | (byteBuffer.get(offset) & 0xFF);
+		}
+		return result;
 	}
 
 	/**
@@ -861,29 +878,20 @@ public class ByteStreamUtil {
 	 * @return The BigInteger
 	 */
 	public BigInteger getUnsignedLong(ByteBuffer byteBuffer, int offset, ByteOrder order) {
+		long result = 0;
+
 		if (order == ByteOrder.BIG_ENDIAN) {
-	        // Read in Big Endian order
-	        return BigInteger.valueOf(byteBuffer.get(offset) & 0xFF)
-	                         .shiftLeft(56)
-	                         .or(BigInteger.valueOf(byteBuffer.get(offset + 1) & 0xFF).shiftLeft(48))
-	                         .or(BigInteger.valueOf(byteBuffer.get(offset + 2) & 0xFF).shiftLeft(40))
-	                         .or(BigInteger.valueOf(byteBuffer.get(offset + 3) & 0xFF).shiftLeft(32))
-	                         .or(BigInteger.valueOf(byteBuffer.get(offset + 4) & 0xFF).shiftLeft(24))
-	                         .or(BigInteger.valueOf(byteBuffer.get(offset + 5) & 0xFF).shiftLeft(16))
-	                         .or(BigInteger.valueOf(byteBuffer.get(offset + 6) & 0xFF).shiftLeft(8))
-	                         .or(BigInteger.valueOf(byteBuffer.get(offset + 7) & 0xFF));
-	    } else {
-	        // Read in Little Endian order
-	        return BigInteger.valueOf(byteBuffer.get(offset + 7) & 0xFF)
-	                         .shiftLeft(56)
-	                         .or(BigInteger.valueOf(byteBuffer.get(offset + 6) & 0xFF).shiftLeft(48))
-	                         .or(BigInteger.valueOf(byteBuffer.get(offset + 5) & 0xFF).shiftLeft(40))
-	                         .or(BigInteger.valueOf(byteBuffer.get(offset + 4) & 0xFF).shiftLeft(32))
-	                         .or(BigInteger.valueOf(byteBuffer.get(offset + 3) & 0xFF).shiftLeft(24))
-	                         .or(BigInteger.valueOf(byteBuffer.get(offset + 2) & 0xFF).shiftLeft(16))
-	                         .or(BigInteger.valueOf(byteBuffer.get(offset + 1) & 0xFF).shiftLeft(8))
-	                         .or(BigInteger.valueOf(byteBuffer.get(offset) & 0xFF));
-	    }
+			for (int i = 0; i < 8; i++) {
+				result = (result << 8) | (byteBuffer.get(offset + i) & 0xFFL);
+			}
+		} else {
+			for (int i = 7; i >= 0; i--) {
+				result = (result << 8) | (byteBuffer.get(offset + i) & 0xFFL);
+			}
+		}
+
+		// Convert the result to BigInteger for unsigned representation
+		return toUnsignedBigInteger(result);
 	}
 
 	public BigInteger toUnsignedBigInteger(long i) {
@@ -893,6 +901,7 @@ public class ByteStreamUtil {
 			int upper = (int) (i >>> 32);
 			int lower = (int) i;
 
+			// return (upper << 32) + lower
 			return (BigInteger.valueOf(Integer.toUnsignedLong(upper))).shiftLeft(32)
 					.add(BigInteger.valueOf(Integer.toUnsignedLong(lower)));
 		}
@@ -907,30 +916,29 @@ public class ByteStreamUtil {
 	 * @return The BigInteger
 	 */
 	public BigInteger getSignedLong(ByteBuffer byteBuffer, int offset, ByteOrder order) {
-		long value;
-	    
+		BigInteger result = BigInteger.ZERO;
+
 	    if (order == ByteOrder.BIG_ENDIAN) {
-	        value = ((long)(byteBuffer.get(offset) & 0xFF) << 56) |
-	                ((long)(byteBuffer.get(offset + 1) & 0xFF) << 48) |
-	                ((long)(byteBuffer.get(offset + 2) & 0xFF) << 40) |
-	                ((long)(byteBuffer.get(offset + 3) & 0xFF) << 32) |
-	                ((long)(byteBuffer.get(offset + 4) & 0xFF) << 24) |
-	                ((long)(byteBuffer.get(offset + 5) & 0xFF) << 16) |
-	                ((long)(byteBuffer.get(offset + 6) & 0xFF) << 8) |
-	                ((long)(byteBuffer.get(offset + 7) & 0xFF));
+	        boolean isNegative = (byteBuffer.get(offset) & 0x80) != 0; // Check MSB for negative
+	        for (int i = 0; i < 8; i++) {
+	            result = result.shiftLeft(8).add(BigInteger.valueOf(byteBuffer.get(offset + i) & 0xFFL));
+	        }
+	        if (isNegative) {
+	            // Apply sign extension for negative numbers
+	            result = result.subtract(BigInteger.ONE.shiftLeft(64));
+	        }
 	    } else {
-	        value = ((long)(byteBuffer.get(offset + 7) & 0xFF) << 56) |
-	                ((long)(byteBuffer.get(offset + 6) & 0xFF) << 48) |
-	                ((long)(byteBuffer.get(offset + 5) & 0xFF) << 40) |
-	                ((long)(byteBuffer.get(offset + 4) & 0xFF) << 32) |
-	                ((long)(byteBuffer.get(offset + 3) & 0xFF) << 24) |
-	                ((long)(byteBuffer.get(offset + 2) & 0xFF) << 16) |
-	                ((long)(byteBuffer.get(offset + 1) & 0xFF) << 8) |
-	                ((long)(byteBuffer.get(offset) & 0xFF));
+	        boolean isNegative = (byteBuffer.get(offset + 7) & 0x80) != 0; // Check LSB for negative
+	        for (int i = 7; i >= 0; i--) {
+	            result = result.shiftLeft(8).add(BigInteger.valueOf(byteBuffer.get(offset + i) & 0xFFL));
+	        }
+	        if (isNegative) {
+	            // Apply sign extension for negative numbers
+	            result = result.subtract(BigInteger.ONE.shiftLeft(64));
+	        }
 	    }
 
-	    // Convert to signed BigInteger, handling negative values correctly
-	    return BigInteger.valueOf(value);
+	    return result;
 	}
 
 	/**
